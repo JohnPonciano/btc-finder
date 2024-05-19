@@ -36,27 +36,51 @@ if (isMainThread) {
     }
 } else {
     const { start, end, wallets, workerId } = workerData;
-    searchInRange(start, end, wallets, workerId);
+    pollardsKangaroo(start, end, wallets, workerId);
 }
 
-function searchInRange(start, end, wallets, workerId) {
-    const logFrequency = 1000;
-    let key = start;
+function pollardsKangaroo(start, end, wallets, workerId) {
+    const tameStart = (start + end) / 2n;
+    const tameJump = (end - start) / 3n;
+    const wildJump = tameJump;
 
-    while (key <= end) {
-        const pkey = key.toString(16).padStart(64, '0');
-        const publicAddress = generatePublic(pkey);
+    let tamePosition = tameStart;
+    let wildPosition = start;
+    const visitedPositions = new Map();
 
-        if (key % BigInt(logFrequency) === 0n) { // Corrigindo a operação de módulo para usar BigInt
-            parentPort.postMessage({ found: false, message: `Worker ${workerId}: Chave Privada: ${pkey} - Endereço Público: ${publicAddress}` });
+    console.log(`Worker ${workerId} iniciou com intervalo de ${start.toString(16)} a ${end.toString(16)}`);
+
+    while (true) {
+        // Movimentos do canguru domesticado
+        let tameKey = tamePosition.toString(16).padStart(64, '0');
+        let tameAddress = generatePublic(tameKey);
+        console.log(`Worker ${workerId} (Tame): Posicao: ${tamePosition.toString(16)}, Chave: ${tameKey}, Endereco: ${tameAddress}`);
+        if (wallets.includes(tameAddress)) {
+            parentPort.postMessage({ found: true, message: `ACHEI!!!! :D Worker ${workerId} encontrou! Chave Privada: ${tameKey}`, wallet: tameAddress, privateKey: tameKey });
+            return;
         }
+        visitedPositions.set(tameAddress, tameKey);
+        tamePosition += tameJump;
 
-        if (wallets.includes(publicAddress)) {
-            parentPort.postMessage({ found: true, message: `ACHEI!!!! :D Worker ${workerId} encontrou! Chave Privada: ${pkey}`, wallet: publicAddress, privateKey: pkey });
-            break;
+        // Movimentos do canguru selvagem
+        let wildKey = wildPosition.toString(16).padStart(64, '0');
+        let wildAddress = generatePublic(wildKey);
+        console.log(`Worker ${workerId} (Wild): Posicao: ${wildPosition.toString(16)}, Chave: ${wildKey}, Endereco: ${wildAddress}`);
+        if (wallets.includes(wildAddress)) {
+            parentPort.postMessage({ found: true, message: `ACHEI!!!! :D Worker ${workerId} encontrou! Chave Privada: ${wildKey}`, wallet: wildAddress, privateKey: wildKey });
+            return;
         }
+        if (visitedPositions.has(wildAddress)) {
+            let privateKey = visitedPositions.get(wildAddress);
+            parentPort.postMessage({ found: true, message: `ACHEI!!!! :D Worker ${workerId} encontrou! Chave Privada: ${privateKey}`, wallet: wildAddress, privateKey: privateKey });
+            return;
+        }
+        wildPosition += wildJump;
 
-        key += 1n;
+        // Log de progresso
+        if (wildPosition % (wildJump * 100n) === 0n) {
+            console.log(`Worker ${workerId} progrediu para a posição ${wildPosition.toString(16)}`);
+        }
     }
 }
 
