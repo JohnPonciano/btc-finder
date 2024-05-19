@@ -1,6 +1,7 @@
 ﻿const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
 const CoinKey = require('coinkey');
 const fs = require('fs');
+const cliProgress = require('cli-progress');
 
 const wallets = [
     '14u4nA5sugaswb6SZgn5av2vuChdMnD9E5',
@@ -17,20 +18,32 @@ const ranges = [
 const numWorkers = require('os').cpus().length;
 
 if (isMainThread) {
-    // Criar pool de workers
     const workerPool = [];
+    const progressBars = [];
+
+    // Configurar barras de progresso para cada worker
     for (let i = 0; i < numWorkers; i++) {
         const { min, max } = ranges[i % ranges.length]; // Distribuir os intervalos entre os workers
         const worker = new Worker(__filename, { workerData: { start: min, end: max, wallets, workerId: i + 1 } });
         workerPool.push(worker);
 
+        // Criar e configurar a barra de progresso
+        const progressBar = new cliProgress.SingleBar({
+            format: `Worker ${i + 1} [{bar}] {percentage}% | ETA: {eta}s | {value}/{total} Keys`,
+            hideCursor: true
+        }, cliProgress.Presets.shades_classic);
+
+        progressBar.start(Number(max - min), 0);
+        progressBars.push(progressBar);
+
         worker.on('message', (msg) => {
             if (msg.found) {
                 console.log(msg.message);
-                saveToFile(msg.wallet, msg.privateKey); // Salvar em um arquivo quando uma correspondência for encontrada
-                workerPool.forEach(worker => worker.terminate()); // Terminar todos os workers se uma correspondência for encontrada
-            } else {
-                console.log(msg.message);
+                saveToFile(msg.wallet, msg.privateKey);
+                workerPool.forEach(worker => worker.terminate());
+                progressBars.forEach(bar => bar.stop());
+            } else if (msg.update) {
+                progressBars[msg.workerId - 1].increment(msg.update);
             }
         });
     }
@@ -40,15 +53,16 @@ if (isMainThread) {
 }
 
 function searchInRange(start, end, wallets, workerId) {
-    const logFrequency = 1000;
+    const updateFrequency = 1000n;
     let key = start;
+    let progressCount = 0n;
 
     while (key <= end) {
         const pkey = key.toString(16).padStart(64, '0');
         const publicAddress = generatePublic(pkey);
 
-        if (key % BigInt(logFrequency) === 0n) { // Corrigindo a operação de módulo para usar BigInt
-            parentPort.postMessage({ found: false, message: `Worker ${workerId}: Chave Privada: ${pkey} - Endereço Público: ${publicAddress}` });
+        if (progressCount % updateFrequency === 0n) {
+            parentPort.postMessage({ update: Number(updateFrequency), workerId });
         }
 
         if (wallets.includes(publicAddress)) {
@@ -57,6 +71,7 @@ function searchInRange(start, end, wallets, workerId) {
         }
 
         key += 1n;
+        progressCount += 1n;
     }
 }
 
@@ -68,5 +83,5 @@ function generatePublic(privateKey) {
 
 function saveToFile(wallet, privateKey) {
     const data = `Wallet: ${wallet}\nChave Privada: ${privateKey}\n\n`;
-    fs.appendFileSync('correspondencias.txt', data); // Adiciona os dados ao arquivo
+    fs.appendFileSync('correspondencias.txt', data);
 }
