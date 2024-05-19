@@ -3,25 +3,23 @@ const CoinKey = require('coinkey');
 const fs = require('fs');
 
 const wallets = [
-    '14u4nA5sugaswb6SZgn5av2vuChdMnD9E5',
-    '13zb1hQbWVsc2S7ZTZnP2G4undNNpdh5so',
-    '1BY8GQbnueYofwSuFAT3USAhGjPrkxDdW9'
+    '1CMq3SvFcVEcpLMuuH8PUcNiqsK1oicG2D',
 ];
 
-const ranges = [
-    { min: BigInt('0x4000000000000000000000000000000000000000'), max: BigInt('0x7fffffffffffffffffffffffffffffffffffffff') },
-    { min: BigInt('0x2000000000000000'), max: BigInt('0x3ffffffffffffffff') },
-    { min: BigInt('0x4000000000000000'), max: BigInt('0x7ffffffffffffffff') }
-];
+const minRange = BigInt('0x800000000000000000000'); // 2^83
+const maxRange = BigInt('0xfffffffffffffffffffff'); // 2^84 - 1
 
 const numWorkers = require('os').cpus().length;
+const rangeSize = (maxRange - minRange) / BigInt(numWorkers);
 
 if (isMainThread) {
     // Criar pool de workers
     const workerPool = [];
     for (let i = 0; i < numWorkers; i++) {
-        const { min, max } = ranges[i % ranges.length]; // Distribuir os intervalos entre os workers
-        const worker = new Worker(__filename, { workerData: { start: min, end: max, wallets, workerId: i + 1 } });
+        const start = minRange + rangeSize * BigInt(i);
+        const end = (i === numWorkers - 1) ? maxRange : start + rangeSize - 1n; // Ajusta o último intervalo para cobrir até o final
+
+        const worker = new Worker(__filename, { workerData: { start, end, wallets, workerId: i + 1 } });
         workerPool.push(worker);
 
         worker.on('message', (msg) => {
@@ -31,6 +29,16 @@ if (isMainThread) {
                 workerPool.forEach(worker => worker.terminate()); // Terminar todos os workers se uma correspondência for encontrada
             } else {
                 console.log(msg.message);
+            }
+        });
+
+        worker.on('error', (err) => {
+            console.error(`Worker ${i + 1} encountered an error:`, err);
+        });
+
+        worker.on('exit', (code) => {
+            if (code !== 0) {
+                console.error(`Worker ${i + 1} stopped with exit code ${code}`);
             }
         });
     }
